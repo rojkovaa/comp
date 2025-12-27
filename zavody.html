@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<title>Powerlifting Pro – NR & ID Priority</title>
+<style>
+    body { font-family: "Segoe UI", sans-serif; background: #f0f2f5; padding: 20px; color: #333; }
+    .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-bottom: 25px; }
+    
+    .zavodnik-input-row { 
+        display: grid; 
+        grid-template-columns: 2fr 100px 120px 100px 1fr 1fr 1fr 50px; 
+        gap: 8px; align-items: center; padding: 10px; border-bottom: 1px solid #eee; 
+    }
+    .zavodnik-input-row input, .zavodnik-input-row select { padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
+    .header-row { font-weight: bold; background: #34495e; color: white; border-radius: 6px 6px 0 0; }
+    
+    .nr-label { color: #e74c3c; font-weight: bold; font-size: 0.8em; margin-left: 2px; }
+    .nr-check { width: 14px !important; height: 14px !important; cursor: pointer; vertical-align: middle; }
+
+    table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 14px; background: white; }
+    th, td { border: 1px solid #dfe6e9; padding: 10px; text-align: center; }
+    th { background: #2d3436; color: white; }
+    
+    .active-row { background: #fff3a0 !important; outline: 2px solid #f1c40f; }
+    .good { background: #b6f2c2 !important; font-weight: bold; }
+    .bad { background: #f6b0b0 !important; color: #c0392b; text-decoration: line-through; }
+    
+    .input-weight-error { background-color: #ffcccc !important; border: 2px solid #e74c3c !important; }
+    
+    .controls { text-align: center; padding: 20px; border-top: 1px solid #eee; }
+    .btn { padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+    .btn-green { background: #27ae60; color: white; }
+    .btn-blue { background: #3498db; color: white; }
+    
+    #timer { position: fixed; bottom: 20px; right: 20px; font-size: 38px; background: #000; color: #0f0; padding: 12px 25px; border-radius: 12px; font-family: monospace; border: 2px solid #333; }
+    .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="setup" class="card">
+    <h2>Nová soutěž</h2>
+    <button class="btn btn-blue" onclick="initApp('trojboj')">Trojboj</button>
+    <button class="btn btn-blue" onclick="initApp('bench')">Pouze Benchpress</button>
+</div>
+
+<div id="entry" class="card hidden">
+    <div id="competitor-header" class="zavodnik-input-row header-row">
+        <div>Jméno</div><div>Pohl.</div><div>Kategorie</div><div>Váha (kg)</div><div class="sq-col">Dřep</div><div class="bp-col">Bench</div><div class="dl-col">Tah</div><div></div>
+    </div>
+    <div id="competitors-list"></div>
+    <button class="btn btn-blue" style="margin-top:10px" onclick="addCompetitorRow()">➕ Přidat závodníka</button>
+    <button class="btn btn-green" style="width: 100%; margin-top:20px; padding: 15px;" onclick="startCompetition()">▶ SPUSTIT SOUTĚŽ</button>
+</div>
+
+<div id="competition" class="hidden">
+    <div id="tables-container"></div>
+</div>
+
+<div id="results" class="hidden card">
+    <h1 style="text-align: center;">VÝSLEDKOVÁ LISTINA</h1>
+    <div id="results-content"></div>
+</div>
+
+<div id="timer" class="hidden">01:00</div>
+
+<script>
+let mode = "", competitors = [], currentLift = "drep", activeIdx = 0, currentRound = 0, timerSec = 60;
+const CATEGORIES = { m: ["-59", "-66", "-74", "-83", "-93", "-105", "-120", "120+"], f: ["-43", "-47", "-52", "-57", "-63", "-69", "-76", "-84", "84+"] };
+
+function initApp(m) {
+    mode = m;
+    document.getElementById('setup').classList.add('hidden');
+    document.getElementById('entry').classList.remove('hidden');
+    currentLift = (mode === 'bench') ? 'bench' : 'drep';
+    if(mode === 'bench') document.querySelectorAll('.sq-col, .dl-col').forEach(el => el.style.display = 'none');
+    addCompetitorRow();
+}
+
+function addCompetitorRow() {
+    const div = document.createElement("div");
+    div.className = "zavodnik-input-row";
+    div.innerHTML = `
+        <input class="name" placeholder="Jméno">
+        <select class="sex" onchange="updateCat(this)"><option value="m">M</option><option value="f">Ž</option></select>
+        <select class="cat">${CATEGORIES.m.map(c => `<option value="${c}">${c}</option>`).join('')}</select>
+        <input type="number" class="bw" placeholder="kg" step="0.01" oninput="validateWeight(this)">
+        <input type="number" class="sq" placeholder="kg" style="${mode==='bench'?'display:none':''}">
+        <input type="number" class="bp" placeholder="kg">
+        <input type="number" class="dl" placeholder="kg" style="${mode==='bench'?'display:none':''}">
+        <button onclick="this.parentElement.remove()" style="border:none; color:red; background:none; cursor:pointer;">✖</button>
+    `;
+    document.getElementById('competitors-list').appendChild(div);
+}
+
+function updateCat(el) {
+    const sex = el.value;
+    const catSel = el.parentElement.querySelector('.cat');
+    catSel.innerHTML = CATEGORIES[sex].map(c => `<option value="${c}">${c}</option>`).join('');
+}
+
+function validateWeight(input) {
+    const row = input.parentElement;
+    const sex = row.querySelector('.sex').value;
+    const bw = parseFloat(input.value) || 0;
+    const cat = row.querySelector('.cat').value;
+    const cats = CATEGORIES[sex];
+    const idx = cats.indexOf(cat);
+    let min = (idx > 0) ? parseFloat(cats[idx-1].replace('-','')) : 0;
+    let isErr = cat.includes('+') ? (bw <= parseFloat(cat)) : (bw > parseFloat(cat.replace('-','')) || bw <= min);
+    input.classList.toggle('input-weight-error', bw > 0 && isErr);
+}
+
+function startCompetition() {
+    const rows = document.querySelectorAll('#competitors-list .zavodnik-input-row');
+    rows.forEach((row, index) => {
+        competitors.push({
+            id: index, // Pevné ID pro určení pořadí při shodě váhy
+            name: row.querySelector('.name').value || `Závodník ${index+1}`,
+            sex: row.querySelector('.sex').value,
+            cat: row.querySelector('.cat').value,
+            bw: parseFloat(row.querySelector('.bw').value) || 0,
+            lifts: { 
+                drep: [parseFloat(row.querySelector('.sq')?.value)||0, 0, 0],
+                bench: [parseFloat(row.querySelector('.bp')?.value)||0, 0, 0],
+                tah: [parseFloat(row.querySelector('.dl')?.value)||0, 0, 0]
+            },
+            isNR: { drep: [false,false,false], bench: [false,false,false], tah: [false,false,false] },
+            results: { drep: [null,null,null], bench: [null,null,null], tah: [null,null,null] }
+        });
+    });
+    document.getElementById('entry').classList.add('hidden');
+    document.getElementById('competition').classList.remove('hidden');
+    document.getElementById('timer').classList.remove('hidden');
+    render();
+    setInterval(tick, 1000);
+}
+
+function getSortedList(l, r) {
+    // Hlavní řazení: Váha na čince vzestupně, při shodě rozhoduje ID (kdo byl dřív zapsán)
+    return [...competitors].sort((a, b) => (a.lifts[l][r] - b.lifts[l][r]) || (a.id - b.id));
+}
+
+function render() {
+    const container = document.getElementById('tables-container');
+    container.innerHTML = "";
+    const lifts = (mode === 'bench') ? ['bench'] : ['drep', 'bench', 'tah'];
+    
+    lifts.forEach(l => {
+        const sorted = getSortedList(l, currentRound);
+        let html = `<div class="card ${l !== currentLift ? 'inactive-table' : ''}"><h2>${l.toUpperCase()}</h2><table>
+            <tr><th>Jméno</th><th>Váha</th><th>1. pokus</th><th>2. pokus</th><th>3. pokus</th><th>Best</th></tr>`;
+        
+        sorted.forEach((c, idx) => {
+            const active = (l === currentLift && idx === activeIdx);
+            html += `<tr class="${active ? 'active-row' : ''}">
+                <td>${c.name} (${c.cat})</td><td>${c.bw}</td>
+                ${[0,1,2].map(r => `
+                    <td class="${c.results[l][r] || ''}">
+                        <input type="number" value="${c.lifts[l][r]}" onchange="updateVal('${l}',${c.id},${r},this.value)" style="width:55px">
+                        <input type="checkbox" class="nr-check" ${c.isNR[l][r]?'checked':''} onchange="updateNR('${l}',${c.id},${r},this.checked)">
+                        ${c.isNR[l][r] ? '<span class="nr-label">NR</span>' : ''}
+                    </td>`).join('')}
+                <td>${getBestLift(c, l)} kg</td></tr>`;
+        });
+        html += `</table>`;
+        if(l === currentLift) html += `<div class="controls"><button class="btn btn-green" onclick="judge('good')">GOOD LIFT</button> <button class="btn" style="background:#e74c3c;color:white" onclick="judge('bad')">NO LIFT</button> <button class="btn btn-blue" onclick="next()">DALŠÍ</button></div>`;
+        container.innerHTML += html + `</div>`;
+    });
+}
+
+function updateVal(l, id, r, v) { competitors.find(c => c.id === id).lifts[l][r] = parseFloat(v); render(); }
+function updateNR(l, id, r, v) { competitors.find(c => c.id === id).isNR[l][r] = v; render(); }
+
+function getBestLift(c, lift) {
+    let best = 0;
+    for(let i=0; i<3; i++) if(c.results[lift][i] === 'good' && c.lifts[lift][i] > best) best = c.lifts[lift][i];
+    return best;
+}
+
+function judge(res) {
+    const l = currentLift;
+    const sorted = getSortedList(l, currentRound);
+    const c = sorted[activeIdx];
+    c.results[l][currentRound] = res;
+    // Automatické navržení váhy pro další kolo
+    if(currentRound < 2 && c.lifts[l][currentRound+1] === 0) c.lifts[l][currentRound+1] = c.lifts[l][currentRound] + (res === 'good' ? 2.5 : 0);
+    render();
+}
+
+function next() {
+    activeIdx++;
+    if(activeIdx >= competitors.length) {
+        activeIdx = 0; currentRound++;
+        if(currentRound > 2) {
+            currentRound = 0;
+            if(currentLift === 'drep') currentLift = 'bench';
+            else if(currentLift === 'bench' && mode === 'trojboj') currentLift = 'tah';
+            else finish();
+        }
+    }
+    timerSec = 60; render();
+}
+
+function finish() {
+    document.getElementById('competition').classList.add('hidden');
+    document.getElementById('timer').classList.add('hidden');
+    document.getElementById('results').classList.remove('hidden');
+    let html = "";
+    competitors.forEach(c => {
+        let total = getBestLift(c, 'drep') + getBestLift(c, 'bench') + getBestLift(c, 'tah');
+        html += `<div style="margin-bottom: 10px; border-bottom: 1px solid #ccc; padding-bottom: 5px;">
+            <strong>${c.name} (${c.cat})</strong> - Total: ${total} kg 
+            <br><small>${['drep','bench','tah'].map(l => {
+                let bestIdx = -1; let bestV = 0;
+                for(let i=0; i<3; i++) if(c.results[l][i]==='good' && c.lifts[l][i] > bestV) { bestV = c.lifts[l][i]; bestIdx = i; }
+                return bestV > 0 ? `${l.toUpperCase()}: ${bestV}kg ${c.isNR[l][bestIdx] ? ' (NR!)' : ''}` : '';
+            }).filter(x => x !== "").join(', ')}</small>
+        </div>`;
+    });
+    document.getElementById('results-content').innerHTML = html;
+}
+
+function tick() { timerSec--; if(timerSec < 0) timerSec = 60; const m = Math.floor(timerSec/60), s = timerSec%60; document.getElementById('timer').innerText = `${m}:${s.toString().padStart(2,'0')}`; }
+</script>
+</body>
+</html>
