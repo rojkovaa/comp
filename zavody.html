@@ -2,7 +2,7 @@
 <html lang="cs">
 <head>
 <meta charset="UTF-8">
-<title>Competition logger</title>
+<title>Zaznamenávání výsledků</title>
 <style>
     body { font-family: "Segoe UI", sans-serif; background: #f0f2f5; padding: 20px; color: #333; }
     .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-bottom: 25px; }
@@ -92,7 +92,6 @@ let showCategories = true;
 
 const CATEGORIES = { m: ["-59", "-66", "-74", "-83", "-93", "-105", "-120", "120+"], f: ["-43", "-47", "-52", "-57", "-63", "-69", "-76", "-84", "84+"] };
 
-// Oficiální IPF GL Koeficienty
 const GL_COEFFS = {
     trojboj: {
         raw: { m: { a: 1199.72839, b: 1025.18162, c: 0.00921 }, f: { a: 610.32796, b: 435.43223, c: 0.01657 } },
@@ -128,7 +127,6 @@ function toggleCategories() {
     btn.innerText = showCategories ? "Vypnout kategorie ✖" : "Zapnout kategorie ✔";
     btn.classList.toggle('btn-red'); btn.classList.toggle('btn-green');
     header.classList.toggle('no-cat');
-    
     const rows = document.querySelectorAll('#competitors-list .zavodnik-input-row');
     rows.forEach(r => {
         r.classList.toggle('no-cat');
@@ -204,14 +202,28 @@ function calculateGL(comp, total) {
     return (total * 100 / denom).toFixed(4);
 }
 
-function getBestLift(c, lift) {
+function getBestLiftOrExpected(c, lift) {
     let best = 0;
-    for(let i=0; i<3; i++) if(c.results[lift][i] === 'good' && c.lifts[lift][i] > best) best = c.lifts[lift][i];
+    let hasAttempted = false;
+    for(let i=0; i<3; i++) {
+        if(c.results[lift][i] !== null) {
+            hasAttempted = true;
+            if(c.results[lift][i] === 'good' && c.lifts[lift][i] > best) best = c.lifts[lift][i];
+        }
+    }
+    // Pokud ještě nešel ani jeden pokus, počítáme s nahlášeným prvním pokusem
+    if(!hasAttempted) return c.lifts[lift][0];
     return best;
 }
 
 function getProgressiveTotal(c) {
-    return getBestLift(c, 'drep') + getBestLift(c, 'bench') + getBestLift(c, 'tah');
+    let t = 0;
+    if(disc === 'bench') {
+        t = getBestLiftOrExpected(c, 'bench');
+    } else {
+        t = getBestLiftOrExpected(c, 'drep') + getBestLiftOrExpected(c, 'bench') + getBestLiftOrExpected(c, 'tah');
+    }
+    return t;
 }
 
 function render() {
@@ -275,11 +287,14 @@ function finish() {
     document.getElementById('results').classList.remove('hidden');
     let html = "";
     ['m', 'f'].forEach(sex => {
-        html += `<h2 style="background:#2d3436; color:white; padding:10px;">${sex === 'm' ? 'MUŽI' : 'ŽENY'}</h2>`;
-        competitors.filter(c => c.sex === sex).sort((a,b) => calculateGL(b, getProgressiveTotal(b)) - calculateGL(a, getProgressiveTotal(a))).forEach((c, i) => {
-            let total = getProgressiveTotal(c);
-            html += `<p><strong>${i+1}. ${c.name}</strong>: ${total} kg (${calculateGL(c, total)} GL)</p>`;
-        });
+        const filtered = competitors.filter(c => c.sex === sex);
+        if(filtered.length > 0) {
+            html += `<h2 style="background:#2d3436; color:white; padding:10px;">${sex === 'm' ? 'MUŽI' : 'ŽENY'}</h2>`;
+            filtered.sort((a,b) => calculateGL(b, getProgressiveTotal(b)) - calculateGL(a, getProgressiveTotal(a))).forEach((c, i) => {
+                let total = getProgressiveTotal(c);
+                html += `<p><strong>${i+1}. ${c.name}</strong>: ${total} kg (${calculateGL(c, total)} GL)</p>`;
+            });
+        }
     });
     document.getElementById('results-content').innerHTML = html;
 }
