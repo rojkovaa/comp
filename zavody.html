@@ -2,7 +2,7 @@
 <html lang="cs">
 <head>
 <meta charset="UTF-8">
-<title>Powerlifting Pro – NR & ID Priority</title>
+<title>Comp logger</title>
 <style>
     body { font-family: "Segoe UI", sans-serif; background: #f0f2f5; padding: 20px; color: #333; }
     .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-bottom: 25px; }
@@ -25,6 +25,9 @@
     .active-row { background: #fff3a0 !important; outline: 2px solid #f1c40f; }
     .good { background: #b6f2c2 !important; font-weight: bold; }
     .bad { background: #f6b0b0 !important; color: #c0392b; text-decoration: line-through; }
+    
+    .total-cell { background: #f8f9fa; font-weight: bold; }
+    .gl-pts { display: block; font-size: 0.85em; color: #16a085; font-weight: bold; }
     
     .input-weight-error { background-color: #ffcccc !important; border: 2px solid #e74c3c !important; }
     
@@ -68,6 +71,12 @@
 <script>
 let mode = "", competitors = [], currentLift = "drep", activeIdx = 0, currentRound = 0, timerSec = 60;
 const CATEGORIES = { m: ["-59", "-66", "-74", "-83", "-93", "-105", "-120", "120+"], f: ["-43", "-47", "-52", "-57", "-63", "-69", "-76", "-84", "84+"] };
+
+// Koeficienty pro IPF GL Body (RAW)
+const GL_COEFFS = {
+    trojboj: { m: { a: 1199.72839, b: 1025.18162, c: 0.00921 }, f: { a: 610.32796, b: 435.43223, c: 0.01657 } },
+    bench: { m: { a: 320.44458, b: 281.24073, c: 0.01898 }, f: { a: 221.82209, b: 194.01303, c: 0.02421 } }
+};
 
 function initApp(m) {
     mode = m;
@@ -116,7 +125,7 @@ function startCompetition() {
     const rows = document.querySelectorAll('#competitors-list .zavodnik-input-row');
     rows.forEach((row, index) => {
         competitors.push({
-            id: index, // Pevné ID pro určení pořadí při shodě váhy
+            id: index,
             name: row.querySelector('.name').value || `Závodník ${index+1}`,
             sex: row.querySelector('.sex').value,
             cat: row.querySelector('.cat').value,
@@ -137,8 +146,24 @@ function startCompetition() {
     setInterval(tick, 1000);
 }
 
+function calculateGL(comp, total) {
+    if (total <= 0) return "0.0000";
+    const c = GL_COEFFS[mode][comp.sex];
+    const denom = c.a - (c.b * Math.exp(-c.c * comp.bw));
+    return (total * 100 / denom).toFixed(4);
+}
+
+function getBestLift(c, lift) {
+    let best = 0;
+    for(let i=0; i<3; i++) if(c.results[lift][i] === 'good' && c.lifts[lift][i] > best) best = c.lifts[lift][i];
+    return best;
+}
+
+function getProgressiveTotal(c) {
+    return getBestLift(c, 'drep') + getBestLift(c, 'bench') + getBestLift(c, 'tah');
+}
+
 function getSortedList(l, r) {
-    // Hlavní řazení: Váha na čince vzestupně, při shodě rozhoduje ID (kdo byl dřív zapsán)
     return [...competitors].sort((a, b) => (a.lifts[l][r] - b.lifts[l][r]) || (a.id - b.id));
 }
 
@@ -150,10 +175,13 @@ function render() {
     lifts.forEach(l => {
         const sorted = getSortedList(l, currentRound);
         let html = `<div class="card ${l !== currentLift ? 'inactive-table' : ''}"><h2>${l.toUpperCase()}</h2><table>
-            <tr><th>Jméno</th><th>Váha</th><th>1. pokus</th><th>2. pokus</th><th>3. pokus</th><th>Best</th></tr>`;
+            <tr><th>Jméno</th><th>Váha</th><th>1. pokus</th><th>2. pokus</th><th>3. pokus</th><th>Total (GL Body)</th></tr>`;
         
         sorted.forEach((c, idx) => {
             const active = (l === currentLift && idx === activeIdx);
+            const currentTotal = getProgressiveTotal(c);
+            const currentGL = calculateGL(c, currentTotal);
+            
             html += `<tr class="${active ? 'active-row' : ''}">
                 <td>${c.name} (${c.cat})</td><td>${c.bw}</td>
                 ${[0,1,2].map(r => `
@@ -162,7 +190,7 @@ function render() {
                         <input type="checkbox" class="nr-check" ${c.isNR[l][r]?'checked':''} onchange="updateNR('${l}',${c.id},${r},this.checked)">
                         ${c.isNR[l][r] ? '<span class="nr-label">NR</span>' : ''}
                     </td>`).join('')}
-                <td>${getBestLift(c, l)} kg</td></tr>`;
+                <td class="total-cell">${currentTotal} kg <span class="gl-pts">${currentGL} GL</span></td></tr>`;
         });
         html += `</table>`;
         if(l === currentLift) html += `<div class="controls"><button class="btn btn-green" onclick="judge('good')">GOOD LIFT</button> <button class="btn" style="background:#e74c3c;color:white" onclick="judge('bad')">NO LIFT</button> <button class="btn btn-blue" onclick="next()">DALŠÍ</button></div>`;
@@ -173,18 +201,11 @@ function render() {
 function updateVal(l, id, r, v) { competitors.find(c => c.id === id).lifts[l][r] = parseFloat(v); render(); }
 function updateNR(l, id, r, v) { competitors.find(c => c.id === id).isNR[l][r] = v; render(); }
 
-function getBestLift(c, lift) {
-    let best = 0;
-    for(let i=0; i<3; i++) if(c.results[lift][i] === 'good' && c.lifts[lift][i] > best) best = c.lifts[lift][i];
-    return best;
-}
-
 function judge(res) {
     const l = currentLift;
     const sorted = getSortedList(l, currentRound);
     const c = sorted[activeIdx];
     c.results[l][currentRound] = res;
-    // Automatické navržení váhy pro další kolo
     if(currentRound < 2 && c.lifts[l][currentRound+1] === 0) c.lifts[l][currentRound+1] = c.lifts[l][currentRound] + (res === 'good' ? 2.5 : 0);
     render();
 }
@@ -208,10 +229,11 @@ function finish() {
     document.getElementById('timer').classList.add('hidden');
     document.getElementById('results').classList.remove('hidden');
     let html = "";
-    competitors.forEach(c => {
-        let total = getBestLift(c, 'drep') + getBestLift(c, 'bench') + getBestLift(c, 'tah');
+    competitors.sort((a,b) => calculateGL(b, getProgressiveTotal(b)) - calculateGL(a, getProgressiveTotal(a))).forEach((c, i) => {
+        let total = getProgressiveTotal(c);
+        let gl = calculateGL(c, total);
         html += `<div style="margin-bottom: 10px; border-bottom: 1px solid #ccc; padding-bottom: 5px;">
-            <strong>${c.name} (${c.cat})</strong> - Total: ${total} kg 
+            <strong>${i+1}. ${c.name} (${c.cat})</strong> - Total: ${total} kg | <strong>${gl} GL</strong>
             <br><small>${['drep','bench','tah'].map(l => {
                 let bestIdx = -1; let bestV = 0;
                 for(let i=0; i<3; i++) if(c.results[l][i]==='good' && c.lifts[l][i] > bestV) { bestV = c.lifts[l][i]; bestIdx = i; }
