@@ -2,21 +2,26 @@
 <html lang="cs">
 <head>
 <meta charset="UTF-8">
-<title>Comp logger</title>
+<title>Competition logger</title>
 <style>
     body { font-family: "Segoe UI", sans-serif; background: #f0f2f5; padding: 20px; color: #333; }
     .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-bottom: 25px; }
     
+    .menu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 600px; margin: 0 auto; }
+    .menu-btn { padding: 30px; font-size: 1.2em; cursor: pointer; border: 2px solid #3498db; background: white; border-radius: 10px; transition: 0.3s; font-weight: bold; }
+    .menu-btn:hover { background: #3498db; color: white; }
+
     .zavodnik-input-row { 
         display: grid; 
-        grid-template-columns: 2fr 100px 120px 100px 1fr 1fr 1fr 50px; 
+        grid-template-columns: 2fr 80px 120px 100px 1fr 1fr 1fr 50px; 
         gap: 8px; align-items: center; padding: 10px; border-bottom: 1px solid #eee; 
     }
+    .zavodnik-input-row.no-cat { grid-template-columns: 2fr 80px 100px 1fr 1fr 1fr 50px; }
     .zavodnik-input-row input, .zavodnik-input-row select { padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; }
-    .header-row { font-weight: bold; background: #34495e; color: white; border-radius: 6px 6px 0 0; }
     
+    .header-row { font-weight: bold; background: #34495e; color: white; border-radius: 6px 6px 0 0; }
     .nr-label { color: #e74c3c; font-weight: bold; font-size: 0.8em; margin-left: 2px; }
-    .nr-check { width: 14px !important; height: 14px !important; cursor: pointer; vertical-align: middle; }
+    .nr-check { width: 14px !important; height: 14px !important; cursor: pointer; }
 
     table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 14px; background: white; }
     th, td { border: 1px solid #dfe6e9; padding: 10px; text-align: center; }
@@ -25,32 +30,45 @@
     .active-row { background: #fff3a0 !important; outline: 2px solid #f1c40f; }
     .good { background: #b6f2c2 !important; font-weight: bold; }
     .bad { background: #f6b0b0 !important; color: #c0392b; text-decoration: line-through; }
-    
     .total-cell { background: #f8f9fa; font-weight: bold; }
     .gl-pts { display: block; font-size: 0.85em; color: #16a085; font-weight: bold; }
     
     .input-weight-error { background-color: #ffcccc !important; border: 2px solid #e74c3c !important; }
-    
     .controls { text-align: center; padding: 20px; border-top: 1px solid #eee; }
     .btn { padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
     .btn-green { background: #27ae60; color: white; }
     .btn-blue { background: #3498db; color: white; }
+    .btn-red { background: #e74c3c; color: white; }
     
-    #timer { position: fixed; bottom: 20px; right: 20px; font-size: 38px; background: #000; color: #0f0; padding: 12px 25px; border-radius: 12px; font-family: monospace; border: 2px solid #333; }
+    #timer { position: fixed; bottom: 20px; right: 20px; font-size: 38px; background: #000; color: #0f0; padding: 12px 25px; border-radius: 12px; font-family: monospace; border: 2px solid #333; z-index: 100; }
     .hidden { display: none !important; }
 </style>
 </head>
 <body>
 
-<div id="setup" class="card">
-    <h2>Nová soutěž</h2>
-    <button class="btn btn-blue" onclick="initApp('trojboj')">Trojboj</button>
-    <button class="btn btn-blue" onclick="initApp('bench')">Pouze Benchpress</button>
+<div id="step1" class="card">
+    <h2 style="text-align:center">Vyberte disciplínu</h2>
+    <div class="menu-grid">
+        <button class="menu-btn" onclick="selectDisc('trojboj')">Trojboj</button>
+        <button class="menu-btn" onclick="selectDisc('bench')">Bench</button>
+    </div>
+</div>
+
+<div id="step2" class="card hidden">
+    <h2 id="disc-title" style="text-align:center"></h2>
+    <div class="menu-grid">
+        <button class="menu-btn" onclick="initApp('raw')">RAW</button>
+        <button class="menu-btn" onclick="initApp('eq')">EQ</button>
+    </div>
 </div>
 
 <div id="entry" class="card hidden">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h3 id="setup-summary"></h3>
+        <button id="toggleCatBtn" class="btn btn-red" style="padding: 5px 10px; font-size: 12px;" onclick="toggleCategories()">Vypnout kategorie ✖</button>
+    </div>
     <div id="competitor-header" class="zavodnik-input-row header-row">
-        <div>Jméno</div><div>Pohl.</div><div>Kategorie</div><div>Váha (kg)</div><div class="sq-col">Dřep</div><div class="bp-col">Bench</div><div class="dl-col">Tah</div><div></div>
+        <div>Jméno</div><div>Pohl.</div><div class="cat-col">Kategorie</div><div>Váha (kg)</div><div class="sq-col">Dřep</div><div class="bp-col">Bench</div><div class="dl-col">Tah</div><div></div>
     </div>
     <div id="competitors-list"></div>
     <button class="btn btn-blue" style="margin-top:10px" onclick="addCompetitorRow()">➕ Přidat závodníka</button>
@@ -69,35 +87,67 @@
 <div id="timer" class="hidden">01:00</div>
 
 <script>
-let mode = "", competitors = [], currentLift = "drep", activeIdx = 0, currentRound = 0, timerSec = 60;
+let disc = "", equip = "", competitors = [], currentLift = "drep", activeIdx = 0, currentRound = 0, timerSec = 60;
+let showCategories = true;
+
 const CATEGORIES = { m: ["-59", "-66", "-74", "-83", "-93", "-105", "-120", "120+"], f: ["-43", "-47", "-52", "-57", "-63", "-69", "-76", "-84", "84+"] };
 
-// Koeficienty pro IPF GL Body (RAW)
+// Oficiální IPF GL Koeficienty
 const GL_COEFFS = {
-    trojboj: { m: { a: 1199.72839, b: 1025.18162, c: 0.00921 }, f: { a: 610.32796, b: 435.43223, c: 0.01657 } },
-    bench: { m: { a: 320.44458, b: 281.24073, c: 0.01898 }, f: { a: 221.82209, b: 194.01303, c: 0.02421 } }
+    trojboj: {
+        raw: { m: { a: 1199.72839, b: 1025.18162, c: 0.00921 }, f: { a: 610.32796, b: 435.43223, c: 0.01657 } },
+        eq: { m: { a: 1236.25115, b: 1049.93869, c: 0.00930 }, f: { a: 758.26475, b: 568.33271, c: 0.01491 } }
+    },
+    bench: {
+        raw: { m: { a: 320.44458, b: 281.24073, c: 0.01898 }, f: { a: 221.82209, b: 194.01303, c: 0.02421 } },
+        eq: { m: { a: 381.22073, b: 333.27375, c: 0.01906 }, f: { a: 278.83621, b: 236.45550, c: 0.02384 } }
+    }
 };
 
-function initApp(m) {
-    mode = m;
-    document.getElementById('setup').classList.add('hidden');
+function selectDisc(d) {
+    disc = d;
+    document.getElementById('step1').classList.add('hidden');
+    document.getElementById('step2').classList.remove('hidden');
+    document.getElementById('disc-title').innerText = d === 'trojboj' ? 'Disciplína: Trojboj' : 'Disciplína: Benchpress';
+}
+
+function initApp(e) {
+    equip = e;
+    document.getElementById('step2').classList.add('hidden');
     document.getElementById('entry').classList.remove('hidden');
-    currentLift = (mode === 'bench') ? 'bench' : 'drep';
-    if(mode === 'bench') document.querySelectorAll('.sq-col, .dl-col').forEach(el => el.style.display = 'none');
+    document.getElementById('setup-summary').innerText = `${disc.toUpperCase()} - ${equip.toUpperCase()}`;
+    currentLift = (disc === 'bench') ? 'bench' : 'drep';
+    if(disc === 'bench') document.querySelectorAll('.sq-col, .dl-col').forEach(el => el.style.display = 'none');
     addCompetitorRow();
+}
+
+function toggleCategories() {
+    showCategories = !showCategories;
+    const btn = document.getElementById('toggleCatBtn');
+    const header = document.getElementById('competitor-header');
+    btn.innerText = showCategories ? "Vypnout kategorie ✖" : "Zapnout kategorie ✔";
+    btn.classList.toggle('btn-red'); btn.classList.toggle('btn-green');
+    header.classList.toggle('no-cat');
+    
+    const rows = document.querySelectorAll('#competitors-list .zavodnik-input-row');
+    rows.forEach(r => {
+        r.classList.toggle('no-cat');
+        const catCol = r.querySelector('.cat');
+        if(catCol) catCol.style.display = showCategories ? 'block' : 'none';
+    });
 }
 
 function addCompetitorRow() {
     const div = document.createElement("div");
-    div.className = "zavodnik-input-row";
+    div.className = "zavodnik-input-row" + (showCategories ? "" : " no-cat");
     div.innerHTML = `
         <input class="name" placeholder="Jméno">
         <select class="sex" onchange="updateCat(this)"><option value="m">M</option><option value="f">Ž</option></select>
-        <select class="cat">${CATEGORIES.m.map(c => `<option value="${c}">${c}</option>`).join('')}</select>
+        <select class="cat" style="${showCategories?'':'display:none'}">${CATEGORIES.m.map(c => `<option value="${c}">${c}</option>`).join('')}</select>
         <input type="number" class="bw" placeholder="kg" step="0.01" oninput="validateWeight(this)">
-        <input type="number" class="sq" placeholder="kg" style="${mode==='bench'?'display:none':''}">
+        <input type="number" class="sq" placeholder="kg" style="${disc==='bench'?'display:none':''}">
         <input type="number" class="bp" placeholder="kg">
-        <input type="number" class="dl" placeholder="kg" style="${mode==='bench'?'display:none':''}">
+        <input type="number" class="dl" placeholder="kg" style="${disc==='bench'?'display:none':''}">
         <button onclick="this.parentElement.remove()" style="border:none; color:red; background:none; cursor:pointer;">✖</button>
     `;
     document.getElementById('competitors-list').appendChild(div);
@@ -110,6 +160,7 @@ function updateCat(el) {
 }
 
 function validateWeight(input) {
+    if (!showCategories) { input.classList.remove('input-weight-error'); return; }
     const row = input.parentElement;
     const sex = row.querySelector('.sex').value;
     const bw = parseFloat(input.value) || 0;
@@ -128,7 +179,7 @@ function startCompetition() {
             id: index,
             name: row.querySelector('.name').value || `Závodník ${index+1}`,
             sex: row.querySelector('.sex').value,
-            cat: row.querySelector('.cat').value,
+            cat: showCategories ? row.querySelector('.cat').value : "Open",
             bw: parseFloat(row.querySelector('.bw').value) || 0,
             lifts: { 
                 drep: [parseFloat(row.querySelector('.sq')?.value)||0, 0, 0],
@@ -148,7 +199,7 @@ function startCompetition() {
 
 function calculateGL(comp, total) {
     if (total <= 0) return "0.0000";
-    const c = GL_COEFFS[mode][comp.sex];
+    const c = GL_COEFFS[disc][equip][comp.sex];
     const denom = c.a - (c.b * Math.exp(-c.c * comp.bw));
     return (total * 100 / denom).toFixed(4);
 }
@@ -163,37 +214,31 @@ function getProgressiveTotal(c) {
     return getBestLift(c, 'drep') + getBestLift(c, 'bench') + getBestLift(c, 'tah');
 }
 
-function getSortedList(l, r) {
-    return [...competitors].sort((a, b) => (a.lifts[l][r] - b.lifts[l][r]) || (a.id - b.id));
-}
-
 function render() {
     const container = document.getElementById('tables-container');
     container.innerHTML = "";
-    const lifts = (mode === 'bench') ? ['bench'] : ['drep', 'bench', 'tah'];
+    const lifts = (disc === 'bench') ? ['bench'] : ['drep', 'bench', 'tah'];
     
     lifts.forEach(l => {
-        const sorted = getSortedList(l, currentRound);
+        const sorted = [...competitors].sort((a, b) => (a.lifts[l][currentRound] - b.lifts[l][currentRound]) || (a.id - b.id));
         let html = `<div class="card ${l !== currentLift ? 'inactive-table' : ''}"><h2>${l.toUpperCase()}</h2><table>
             <tr><th>Jméno</th><th>Váha</th><th>1. pokus</th><th>2. pokus</th><th>3. pokus</th><th>Total (GL Body)</th></tr>`;
         
         sorted.forEach((c, idx) => {
             const active = (l === currentLift && idx === activeIdx);
-            const currentTotal = getProgressiveTotal(c);
-            const currentGL = calculateGL(c, currentTotal);
-            
+            const total = getProgressiveTotal(c);
             html += `<tr class="${active ? 'active-row' : ''}">
-                <td>${c.name} (${c.cat})</td><td>${c.bw}</td>
+                <td>${c.name}</td><td>${c.bw}</td>
                 ${[0,1,2].map(r => `
                     <td class="${c.results[l][r] || ''}">
-                        <input type="number" value="${c.lifts[l][r]}" onchange="updateVal('${l}',${c.id},${r},this.value)" style="width:55px">
+                        <input type="number" value="${c.lifts[l][r]}" onchange="updateVal('${l}',${c.id},${r},this.value)" style="width:50px">
                         <input type="checkbox" class="nr-check" ${c.isNR[l][r]?'checked':''} onchange="updateNR('${l}',${c.id},${r},this.checked)">
                         ${c.isNR[l][r] ? '<span class="nr-label">NR</span>' : ''}
                     </td>`).join('')}
-                <td class="total-cell">${currentTotal} kg <span class="gl-pts">${currentGL} GL</span></td></tr>`;
+                <td class="total-cell">${total} kg <span class="gl-pts">${calculateGL(c, total)} GL</span></td></tr>`;
         });
         html += `</table>`;
-        if(l === currentLift) html += `<div class="controls"><button class="btn btn-green" onclick="judge('good')">GOOD LIFT</button> <button class="btn" style="background:#e74c3c;color:white" onclick="judge('bad')">NO LIFT</button> <button class="btn btn-blue" onclick="next()">DALŠÍ</button></div>`;
+        if(l === currentLift) html += `<div class="controls"><button class="btn btn-green" onclick="judge('good')">GOOD LIFT</button> <button class="btn btn-red" onclick="judge('bad')">NO LIFT</button> <button class="btn btn-blue" onclick="next()">DALŠÍ</button></div>`;
         container.innerHTML += html + `</div>`;
     });
 }
@@ -203,7 +248,7 @@ function updateNR(l, id, r, v) { competitors.find(c => c.id === id).isNR[l][r] =
 
 function judge(res) {
     const l = currentLift;
-    const sorted = getSortedList(l, currentRound);
+    const sorted = [...competitors].sort((a, b) => (a.lifts[l][currentRound] - b.lifts[l][currentRound]) || (a.id - b.id));
     const c = sorted[activeIdx];
     c.results[l][currentRound] = res;
     if(currentRound < 2 && c.lifts[l][currentRound+1] === 0) c.lifts[l][currentRound+1] = c.lifts[l][currentRound] + (res === 'good' ? 2.5 : 0);
@@ -217,7 +262,7 @@ function next() {
         if(currentRound > 2) {
             currentRound = 0;
             if(currentLift === 'drep') currentLift = 'bench';
-            else if(currentLift === 'bench' && mode === 'trojboj') currentLift = 'tah';
+            else if(currentLift === 'bench' && disc === 'trojboj') currentLift = 'tah';
             else finish();
         }
     }
@@ -229,17 +274,12 @@ function finish() {
     document.getElementById('timer').classList.add('hidden');
     document.getElementById('results').classList.remove('hidden');
     let html = "";
-    competitors.sort((a,b) => calculateGL(b, getProgressiveTotal(b)) - calculateGL(a, getProgressiveTotal(a))).forEach((c, i) => {
-        let total = getProgressiveTotal(c);
-        let gl = calculateGL(c, total);
-        html += `<div style="margin-bottom: 10px; border-bottom: 1px solid #ccc; padding-bottom: 5px;">
-            <strong>${i+1}. ${c.name} (${c.cat})</strong> - Total: ${total} kg | <strong>${gl} GL</strong>
-            <br><small>${['drep','bench','tah'].map(l => {
-                let bestIdx = -1; let bestV = 0;
-                for(let i=0; i<3; i++) if(c.results[l][i]==='good' && c.lifts[l][i] > bestV) { bestV = c.lifts[l][i]; bestIdx = i; }
-                return bestV > 0 ? `${l.toUpperCase()}: ${bestV}kg ${c.isNR[l][bestIdx] ? ' (NR!)' : ''}` : '';
-            }).filter(x => x !== "").join(', ')}</small>
-        </div>`;
+    ['m', 'f'].forEach(sex => {
+        html += `<h2 style="background:#2d3436; color:white; padding:10px;">${sex === 'm' ? 'MUŽI' : 'ŽENY'}</h2>`;
+        competitors.filter(c => c.sex === sex).sort((a,b) => calculateGL(b, getProgressiveTotal(b)) - calculateGL(a, getProgressiveTotal(a))).forEach((c, i) => {
+            let total = getProgressiveTotal(c);
+            html += `<p><strong>${i+1}. ${c.name}</strong>: ${total} kg (${calculateGL(c, total)} GL)</p>`;
+        });
     });
     document.getElementById('results-content').innerHTML = html;
 }
