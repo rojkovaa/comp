@@ -2,7 +2,7 @@
 <html lang="cs">
 <head>
 <meta charset="UTF-8">
-<title>Zaznamenávání výsledků</title>
+<title>Výsledky - zapisování</title>
 <style>
     body { font-family: "Segoe UI", sans-serif; background: #f0f2f5; padding: 20px; color: #333; }
     .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); margin-bottom: 25px; }
@@ -31,6 +31,8 @@
     .bad { background: #f6b0b0 !important; color: #c0392b; text-decoration: line-through; }
     .total-cell { background: #f8f9fa; font-weight: bold; }
     .gl-pts { display: block; font-size: 0.85em; color: #16a085; font-weight: bold; }
+    
+    .input-weight-error { background-color: #ffcccc !important; border: 2px solid #e74c3c !important; }
     
     .btn { padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
     .btn-green { background: #27ae60; color: white; }
@@ -92,9 +94,11 @@
 let disc = "", equip = "", competitors = [], currentLift = "drep", activeIdx = 0, currentRound = 0, timerSec = 60;
 let showCategories = true;
 
-const CATEGORIES = { m: ["-59", "-66", "-74", "-83", "-93", "-105", "-120", "120+"], f: ["-43", "-47", "-52", "-57", "-63", "-69", "-76", "-84", "84+"] };
+const CATEGORIES = { 
+    m: ["-59", "-66", "-74", "-83", "-93", "-105", "-120", "120+"], 
+    f: ["-43", "-47", "-52", "-57", "-63", "-69", "-76", "-84", "84+"] 
+};
 
-// Opravené a ověřené IPF GL koeficienty
 const GL_COEFFS = {
     trojboj: {
         raw: { m: { a: 1199.72839, b: 1025.18162, c: 0.00921 }, f: { a: 610.32796, b: 435.43223, c: 0.01657 } },
@@ -129,7 +133,24 @@ function toggleCategories() {
     btn.innerText = showCategories ? "Vypnout kategorie ✖" : "Zapnout kategorie ✔";
     btn.classList.toggle('btn-red'); btn.classList.toggle('btn-green');
     document.getElementById('competitor-header').classList.toggle('no-cat');
-    document.querySelectorAll('#competitors-list .zavodnik-input-row').forEach(r => r.classList.toggle('no-cat'));
+    document.querySelectorAll('#competitors-list .zavodnik-input-row').forEach(r => {
+        r.classList.toggle('no-cat');
+        const catSel = r.querySelector('.cat');
+        if(catSel) catSel.style.display = showCategories ? 'block' : 'none';
+    });
+}
+
+function validateWeight(input) {
+    if (!showCategories) { input.classList.remove('input-weight-error'); return; }
+    const row = input.parentElement;
+    const sex = row.querySelector('.sex').value;
+    const bw = parseFloat(input.value) || 0;
+    const cat = row.querySelector('.cat').value;
+    const cats = CATEGORIES[sex];
+    const idx = cats.indexOf(cat);
+    let min = (idx > 0) ? parseFloat(cats[idx-1].replace('-','')) : 0;
+    let isErr = cat.includes('+') ? (bw <= parseFloat(cat)) : (bw > parseFloat(cat.replace('-','')) || bw <= min);
+    input.classList.toggle('input-weight-error', bw > 0 && isErr);
 }
 
 function addCompetitorRow() {
@@ -139,7 +160,7 @@ function addCompetitorRow() {
         <input class="name" placeholder="Jméno">
         <select class="sex" onchange="updateCat(this)"><option value="m">M</option><option value="f">Ž</option></select>
         <select class="cat" style="${showCategories?'':'display:none'}">${CATEGORIES.m.map(c => `<option value="${c}">${c}</option>`).join('')}</select>
-        <input type="number" class="bw" placeholder="kg" step="0.01">
+        <input type="number" class="bw" placeholder="kg" step="0.01" oninput="validateWeight(this)">
         <input type="number" class="sq" placeholder="kg" style="${disc==='bench'?'display:none':''}">
         <input type="number" class="bp" placeholder="kg">
         <input type="number" class="dl" placeholder="kg" style="${disc==='bench'?'display:none':''}">
@@ -151,7 +172,11 @@ function addCompetitorRow() {
 function updateCat(el) {
     const sex = el.value;
     const catSel = el.parentElement.querySelector('.cat');
-    catSel.innerHTML = CATEGORIES[sex].map(c => `<option value="${c}">${c}</option>`).join('');
+    if(catSel) {
+        catSel.innerHTML = CATEGORIES[sex].map(c => `<option value="${c}">${c}</option>`).join('');
+        const bwInput = el.parentElement.querySelector('.bw');
+        if(bwInput.value) validateWeight(bwInput);
+    }
 }
 
 function calculateGL(comp, total) {
@@ -261,14 +286,16 @@ function finish() {
     document.getElementById('results').classList.remove('hidden');
     
     let html = "";
-    // 1. Výsledky podle váhových kategorií
     if(showCategories) {
         html += `<h2 class="res-section">POŘADÍ V KATEGORIÍCH</h2>`;
-        const cats = [...new Set(competitors.map(c => `${c.sex === 'm' ? 'Muži' : 'Ženy'} ${c.cat}`))].sort();
-        cats.forEach(catName => {
-            const filtered = competitors.filter(c => `${c.sex === 'm' ? 'Muži' : 'Ženy'} ${c.cat}` === catName);
+        // Seskupení podle pohlavi a kategorie
+        const catKeys = [...new Set(competitors.map(c => JSON.stringify({sex: c.sex, cat: c.cat})))].sort();
+        catKeys.forEach(keyJson => {
+            const key = JSON.parse(keyJson);
+            const filtered = competitors.filter(c => c.sex === key.sex && c.cat === key.cat);
             filtered.sort((a, b) => getProgressiveTotal(b) - getProgressiveTotal(a) || a.bw - b.bw);
-            html += `<h3>${catName}</h3><table><tr><th>Poř.</th><th>Jméno</th><th>Total</th><th>GL Body</th></tr>`;
+            
+            html += `<h3>${key.sex === 'm' ? 'Muži' : 'Ženy'} ${key.cat}</h3><table><tr><th>Poř.</th><th>Jméno</th><th>Total</th><th>GL Body</th></tr>`;
             filtered.forEach((c, i) => {
                 const total = getProgressiveTotal(c);
                 html += `<tr><td>${i+1}.</td><td>${c.name}</td><td>${total} kg</td><td>${calculateGL(c, total)}</td></tr>`;
@@ -277,7 +304,6 @@ function finish() {
         });
     }
 
-    // 2. Absolutní pořadí podle GL bodů
     html += `<h2 class="res-section">ABSOLUTNÍ POŘADÍ (IPF GL)</h2>`;
     ['m', 'f'].forEach(sex => {
         const filtered = competitors.filter(c => c.sex === sex);
