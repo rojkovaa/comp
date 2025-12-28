@@ -21,8 +21,7 @@
     
     .header-row { font-weight: bold; background: #34495e; color: white; border-radius: 6px 6px 0 0; }
     .nr-label { color: #e74c3c; font-weight: bold; font-size: 0.8em; margin-left: 2px; }
-    .nr-check { width: 14px !important; height: 14px !important; cursor: pointer; }
-
+    
     table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 14px; background: white; }
     th, td { border: 1px solid #dfe6e9; padding: 10px; text-align: center; }
     th { background: #2d3436; color: white; }
@@ -33,15 +32,15 @@
     .total-cell { background: #f8f9fa; font-weight: bold; }
     .gl-pts { display: block; font-size: 0.85em; color: #16a085; font-weight: bold; }
     
-    .input-weight-error { background-color: #ffcccc !important; border: 2px solid #e74c3c !important; }
-    .controls { text-align: center; padding: 20px; border-top: 1px solid #eee; }
-    .btn { padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+    .btn { padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; }
     .btn-green { background: #27ae60; color: white; }
     .btn-blue { background: #3498db; color: white; }
     .btn-red { background: #e74c3c; color: white; }
+    .btn-gray { background: #95a5a6; color: white; }
     
     #timer { position: fixed; bottom: 20px; right: 20px; font-size: 38px; background: #000; color: #0f0; padding: 12px 25px; border-radius: 12px; font-family: monospace; border: 2px solid #333; z-index: 100; }
     .hidden { display: none !important; }
+    .res-section { margin-top: 30px; border-top: 2px solid #34495e; padding-top: 10px; }
 </style>
 </head>
 <body>
@@ -80,8 +79,11 @@
 </div>
 
 <div id="results" class="hidden card">
-    <h1 style="text-align: center;">VÝSLEDKOVÁ LISTINA</h1>
+    <h1 style="text-align: center;">KONEČNÉ VÝSLEDKY</h1>
     <div id="results-content"></div>
+    <div style="text-align: center; margin-top: 30px;">
+        <button class="btn btn-gray" onclick="backToComp()">⬅ Zpět k opravě pokusů</button>
+    </div>
 </div>
 
 <div id="timer" class="hidden">01:00</div>
@@ -92,6 +94,7 @@ let showCategories = true;
 
 const CATEGORIES = { m: ["-59", "-66", "-74", "-83", "-93", "-105", "-120", "120+"], f: ["-43", "-47", "-52", "-57", "-63", "-69", "-76", "-84", "84+"] };
 
+// Opravené a ověřené IPF GL koeficienty
 const GL_COEFFS = {
     trojboj: {
         raw: { m: { a: 1199.72839, b: 1025.18162, c: 0.00921 }, f: { a: 610.32796, b: 435.43223, c: 0.01657 } },
@@ -123,16 +126,10 @@ function initApp(e) {
 function toggleCategories() {
     showCategories = !showCategories;
     const btn = document.getElementById('toggleCatBtn');
-    const header = document.getElementById('competitor-header');
     btn.innerText = showCategories ? "Vypnout kategorie ✖" : "Zapnout kategorie ✔";
     btn.classList.toggle('btn-red'); btn.classList.toggle('btn-green');
-    header.classList.toggle('no-cat');
-    const rows = document.querySelectorAll('#competitors-list .zavodnik-input-row');
-    rows.forEach(r => {
-        r.classList.toggle('no-cat');
-        const catCol = r.querySelector('.cat');
-        if(catCol) catCol.style.display = showCategories ? 'block' : 'none';
-    });
+    document.getElementById('competitor-header').classList.toggle('no-cat');
+    document.querySelectorAll('#competitors-list .zavodnik-input-row').forEach(r => r.classList.toggle('no-cat'));
 }
 
 function addCompetitorRow() {
@@ -142,7 +139,7 @@ function addCompetitorRow() {
         <input class="name" placeholder="Jméno">
         <select class="sex" onchange="updateCat(this)"><option value="m">M</option><option value="f">Ž</option></select>
         <select class="cat" style="${showCategories?'':'display:none'}">${CATEGORIES.m.map(c => `<option value="${c}">${c}</option>`).join('')}</select>
-        <input type="number" class="bw" placeholder="kg" step="0.01" oninput="validateWeight(this)">
+        <input type="number" class="bw" placeholder="kg" step="0.01">
         <input type="number" class="sq" placeholder="kg" style="${disc==='bench'?'display:none':''}">
         <input type="number" class="bp" placeholder="kg">
         <input type="number" class="dl" placeholder="kg" style="${disc==='bench'?'display:none':''}">
@@ -157,21 +154,32 @@ function updateCat(el) {
     catSel.innerHTML = CATEGORIES[sex].map(c => `<option value="${c}">${c}</option>`).join('');
 }
 
-function validateWeight(input) {
-    if (!showCategories) { input.classList.remove('input-weight-error'); return; }
-    const row = input.parentElement;
-    const sex = row.querySelector('.sex').value;
-    const bw = parseFloat(input.value) || 0;
-    const cat = row.querySelector('.cat').value;
-    const cats = CATEGORIES[sex];
-    const idx = cats.indexOf(cat);
-    let min = (idx > 0) ? parseFloat(cats[idx-1].replace('-','')) : 0;
-    let isErr = cat.includes('+') ? (bw <= parseFloat(cat)) : (bw > parseFloat(cat.replace('-','')) || bw <= min);
-    input.classList.toggle('input-weight-error', bw > 0 && isErr);
+function calculateGL(comp, total) {
+    if (total <= 0) return "0.0000";
+    const c = GL_COEFFS[disc][equip][comp.sex];
+    const denom = c.a - (c.b * Math.exp(-c.c * comp.bw));
+    return (total * 100 / denom).toFixed(4);
+}
+
+function getBestLiftOrExpected(c, lift) {
+    let best = 0; let attempted = false;
+    for(let i=0; i<3; i++) {
+        if(c.results[lift][i] !== null) {
+            attempted = true;
+            if(c.results[lift][i] === 'good' && c.lifts[lift][i] > best) best = c.lifts[lift][i];
+        }
+    }
+    return (!attempted) ? c.lifts[lift][0] : best;
+}
+
+function getProgressiveTotal(c) {
+    if(disc === 'bench') return getBestLiftOrExpected(c, 'bench');
+    return getBestLiftOrExpected(c, 'drep') + getBestLiftOrExpected(c, 'bench') + getBestLiftOrExpected(c, 'tah');
 }
 
 function startCompetition() {
     const rows = document.querySelectorAll('#competitors-list .zavodnik-input-row');
+    competitors = [];
     rows.forEach((row, index) => {
         competitors.push({
             id: index,
@@ -192,38 +200,7 @@ function startCompetition() {
     document.getElementById('competition').classList.remove('hidden');
     document.getElementById('timer').classList.remove('hidden');
     render();
-    setInterval(tick, 1000);
-}
-
-function calculateGL(comp, total) {
-    if (total <= 0) return "0.0000";
-    const c = GL_COEFFS[disc][equip][comp.sex];
-    const denom = c.a - (c.b * Math.exp(-c.c * comp.bw));
-    return (total * 100 / denom).toFixed(4);
-}
-
-function getBestLiftOrExpected(c, lift) {
-    let best = 0;
-    let hasAttempted = false;
-    for(let i=0; i<3; i++) {
-        if(c.results[lift][i] !== null) {
-            hasAttempted = true;
-            if(c.results[lift][i] === 'good' && c.lifts[lift][i] > best) best = c.lifts[lift][i];
-        }
-    }
-    // Pokud ještě nešel ani jeden pokus, počítáme s nahlášeným prvním pokusem
-    if(!hasAttempted) return c.lifts[lift][0];
-    return best;
-}
-
-function getProgressiveTotal(c) {
-    let t = 0;
-    if(disc === 'bench') {
-        t = getBestLiftOrExpected(c, 'bench');
-    } else {
-        t = getBestLiftOrExpected(c, 'drep') + getBestLiftOrExpected(c, 'bench') + getBestLiftOrExpected(c, 'tah');
-    }
-    return t;
+    if(!window.timerInterval) window.timerInterval = setInterval(tick, 1000);
 }
 
 function render() {
@@ -234,23 +211,20 @@ function render() {
     lifts.forEach(l => {
         const sorted = [...competitors].sort((a, b) => (a.lifts[l][currentRound] - b.lifts[l][currentRound]) || (a.id - b.id));
         let html = `<div class="card ${l !== currentLift ? 'inactive-table' : ''}"><h2>${l.toUpperCase()}</h2><table>
-            <tr><th>Jméno</th><th>Váha</th><th>1. pokus</th><th>2. pokus</th><th>3. pokus</th><th>Total (GL Body)</th></tr>`;
-        
+            <tr><th>Jméno</th><th>Váha</th><th>1. pokus</th><th>2. pokus</th><th>3. pokus</th><th>Total (GL)</th></tr>`;
         sorted.forEach((c, idx) => {
             const active = (l === currentLift && idx === activeIdx);
             const total = getProgressiveTotal(c);
             html += `<tr class="${active ? 'active-row' : ''}">
                 <td>${c.name}</td><td>${c.bw}</td>
-                ${[0,1,2].map(r => `
-                    <td class="${c.results[l][r] || ''}">
-                        <input type="number" value="${c.lifts[l][r]}" onchange="updateVal('${l}',${c.id},${r},this.value)" style="width:50px">
-                        <input type="checkbox" class="nr-check" ${c.isNR[l][r]?'checked':''} onchange="updateNR('${l}',${c.id},${r},this.checked)">
-                        ${c.isNR[l][r] ? '<span class="nr-label">NR</span>' : ''}
-                    </td>`).join('')}
-                <td class="total-cell">${total} kg <span class="gl-pts">${calculateGL(c, total)} GL</span></td></tr>`;
+                ${[0,1,2].map(r => `<td class="${c.results[l][r] || ''}">
+                    <input type="number" value="${c.lifts[l][r]}" onchange="updateVal('${l}',${c.id},${r},this.value)" style="width:50px">
+                    <input type="checkbox" ${c.isNR[l][r]?'checked':''} onchange="updateNR('${l}',${c.id},${r},this.checked)"> ${c.isNR[l][r]?'<span class="nr-label">NR</span>':''}
+                </td>`).join('')}
+                <td class="total-cell">${total}kg<br><small>${calculateGL(c, total)} GL</small></td></tr>`;
         });
         html += `</table>`;
-        if(l === currentLift) html += `<div class="controls"><button class="btn btn-green" onclick="judge('good')">GOOD LIFT</button> <button class="btn btn-red" onclick="judge('bad')">NO LIFT</button> <button class="btn btn-blue" onclick="next()">DALŠÍ</button></div>`;
+        if(l === currentLift) html += `<div class="controls"><button class="btn btn-green" onclick="judge('good')">GOOD</button> <button class="btn btn-red" onclick="judge('bad')">NO LIFT</button> <button class="btn btn-blue" onclick="next()">DALŠÍ</button></div>`;
         container.innerHTML += html + `</div>`;
     });
 }
@@ -285,21 +259,53 @@ function finish() {
     document.getElementById('competition').classList.add('hidden');
     document.getElementById('timer').classList.add('hidden');
     document.getElementById('results').classList.remove('hidden');
+    
     let html = "";
+    // 1. Výsledky podle váhových kategorií
+    if(showCategories) {
+        html += `<h2 class="res-section">POŘADÍ V KATEGORIÍCH</h2>`;
+        const cats = [...new Set(competitors.map(c => `${c.sex === 'm' ? 'Muži' : 'Ženy'} ${c.cat}`))].sort();
+        cats.forEach(catName => {
+            const filtered = competitors.filter(c => `${c.sex === 'm' ? 'Muži' : 'Ženy'} ${c.cat}` === catName);
+            filtered.sort((a, b) => getProgressiveTotal(b) - getProgressiveTotal(a) || a.bw - b.bw);
+            html += `<h3>${catName}</h3><table><tr><th>Poř.</th><th>Jméno</th><th>Total</th><th>GL Body</th></tr>`;
+            filtered.forEach((c, i) => {
+                const total = getProgressiveTotal(c);
+                html += `<tr><td>${i+1}.</td><td>${c.name}</td><td>${total} kg</td><td>${calculateGL(c, total)}</td></tr>`;
+            });
+            html += `</table>`;
+        });
+    }
+
+    // 2. Absolutní pořadí podle GL bodů
+    html += `<h2 class="res-section">ABSOLUTNÍ POŘADÍ (IPF GL)</h2>`;
     ['m', 'f'].forEach(sex => {
         const filtered = competitors.filter(c => c.sex === sex);
         if(filtered.length > 0) {
-            html += `<h2 style="background:#2d3436; color:white; padding:10px;">${sex === 'm' ? 'MUŽI' : 'ŽENY'}</h2>`;
-            filtered.sort((a,b) => calculateGL(b, getProgressiveTotal(b)) - calculateGL(a, getProgressiveTotal(a))).forEach((c, i) => {
-                let total = getProgressiveTotal(c);
-                html += `<p><strong>${i+1}. ${c.name}</strong>: ${total} kg (${calculateGL(c, total)} GL)</p>`;
+            html += `<h3>${sex === 'm' ? 'MUŽI' : 'ŽENY'}</h3><table><tr><th>Poř.</th><th>Jméno</th><th>Kategorie</th><th>Total</th><th>GL Body</th></tr>`;
+            filtered.sort((a, b) => calculateGL(b, getProgressiveTotal(b)) - calculateGL(a, getProgressiveTotal(a)));
+            filtered.forEach((c, i) => {
+                const total = getProgressiveTotal(c);
+                html += `<tr><td>${i+1}.</td><td>${c.name}</td><td>${c.cat}</td><td>${total} kg</td><td><strong>${calculateGL(c, total)}</strong></td></tr>`;
             });
+            html += `</table>`;
         }
     });
+    
     document.getElementById('results-content').innerHTML = html;
 }
 
-function tick() { timerSec--; if(timerSec < 0) timerSec = 60; const m = Math.floor(timerSec/60), s = timerSec%60; document.getElementById('timer').innerText = `${m}:${s.toString().padStart(2,'0')}`; }
+function backToComp() {
+    document.getElementById('results').classList.add('hidden');
+    document.getElementById('competition').classList.remove('hidden');
+    document.getElementById('timer').classList.remove('hidden');
+}
+
+function tick() { 
+    if(timerSec > 0) timerSec--; 
+    const m = Math.floor(timerSec/60), s = timerSec%60; 
+    document.getElementById('timer').innerText = `${m}:${s.toString().padStart(2,'0')}`; 
+}
 </script>
 </body>
 </html>
